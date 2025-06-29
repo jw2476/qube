@@ -1,0 +1,13 @@
+[package]
+name = "qube-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ctor = "0.4.2"
+env_logger = "0.11.8"
+libloading = "0.8.8"
+log = "0.4.27"
+notify = "8.0.0"
+qube-core-macros = { version = "0.1.0", path = "../qube-core-macros" }
+thiserror = "2.0.12"

@@ -1,0 +1,27 @@
+[config]
+default_to_workspace = false
+
+[tasks.check]
+command = "cargo"
+args = ["check", "--all-targets", "--all-features"]
+
+[tasks.clippy]
+dependencies = ["check"]
+command = "cargo"
+args = ["clippy", "--all-targets", "--all-features"]
+
+[tasks.build]
+dependencies = ["clippy"]
+command = "cargo"
+args = ["build"]
+
+[tasks.test]
+dependencies = ["clippy"]
+command = "cargo"
+args = ["test", "--all-targets"]
+
+[tasks.run]
+dependencies = ["build"]
+command = "cargo"
+args = ["run"]
+env = { "RUST_LOG" = "debug" }

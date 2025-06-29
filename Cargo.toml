@@ -1,0 +1,4 @@
+[workspace]
+resolver = "2"
+members = ["qube", "qube-core", "qube-core-macros", "qube-name"]
+

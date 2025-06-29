@@ -1,0 +1,11 @@
+[package]
+name = "qube-name"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ctor = "0.4.2"
+qube-core = { version = "0.1.0", path = "../qube-core" }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
