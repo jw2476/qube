@@ -17,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Setup Rust
-      run: rustup update nightly && rustup default nightly
+      run: rustup update nightly && rustup default nightly && rustup component add clippy
     - name: Check
       run: RUSTFLAGS=-Dwarnings cargo check --all-targets --all-features
     - name: Clippy
