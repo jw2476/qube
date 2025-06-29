@@ -11,3 +11,6 @@ log = "0.4.27"
 notify = "8.0.0"
 qube-core-macros = { version = "0.1.0", path = "../qube-core-macros" }
 thiserror = "2.0.12"
+
+[lints]
+workspace = true

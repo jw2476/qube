@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 log = "0.4.27"
 qube-core = { version = "0.1.0", path = "../qube-core" }
+
+[lints]
+workspace  = true
