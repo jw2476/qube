@@ -1,11 +1,18 @@
 [package]
 name = "qube"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 log = "0.4.27"
 qube-core = { version = "0.1.0", path = "../qube-core" }
 
 [lints]
-workspace  = true
+workspace = true
+

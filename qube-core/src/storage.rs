@@ -1,6 +1,7 @@
 use std::{
     alloc::{Allocator, Global, Layout},
     any::{TypeId, type_name},
+    cell::{Ref, RefCell, RefMut},
     ptr::NonNull,
 };
 
@@ -16,12 +17,13 @@ struct VecAny<A: Allocator = Global> {
     capacity: usize,
 }
 
-unsafe impl<A: Allocator> Send for VecAny<A> {}
-unsafe impl<A: Allocator> Sync for VecAny<A> {}
+unsafe impl<A: Allocator + Send> Send for VecAny<A> {}
+unsafe impl<A: Allocator + Sync> Sync for VecAny<A> {}
 
 impl<A: Allocator> VecAny<A> {
     const DEFAULT_CAPACITY: usize = 16;
 
+    #[must_use]
     pub fn new_in(alloc: A, ty: TypeId, item_layout: Layout) -> Self {
         let (layout, stride) = item_layout.repeat(Self::DEFAULT_CAPACITY).unwrap();
         let ptr = alloc.allocate_zeroed(layout).unwrap();
@@ -76,7 +78,7 @@ impl<A: Allocator> VecAny<A> {
         self.grow_to(self.length + 1);
         unsafe {
             self.ptr
-                .byte_offset((self.length * self.stride) as isize)
+                .byte_offset((self.length * self.stride).try_into().unwrap())
                 .cast()
                 .write(item);
         }
@@ -93,6 +95,7 @@ pub struct ComponentInfo {
 }
 
 impl ComponentInfo {
+    #[must_use]
     pub fn new<T: 'static>(plugin: PluginName) -> Self {
         Self {
             plugin,
@@ -103,33 +106,35 @@ impl ComponentInfo {
     }
 }
 
-pub(crate) struct ComponentSet<A: Allocator = Global> {
+pub struct ComponentSet<A: Allocator = Global> {
     pub(crate) info: ComponentInfo,
-    entities: Vec<Entity, A>,
-    components: VecAny<A>,
+    entities: RefCell<Vec<Entity, A>>,
+    components: RefCell<VecAny<A>>,
 }
 
 impl<A: Allocator + Copy> ComponentSet<A> {
     pub fn new(alloc: A, info: ComponentInfo) -> Self {
         Self {
-            components: VecAny::new_in(alloc, info.ty, info.layout),
+            components: RefCell::new(VecAny::new_in(alloc, info.ty, info.layout)),
             info,
-            entities: Vec::new_in(alloc),
+            entities: RefCell::new(Vec::new_in(alloc)),
         }
     }
 
-    pub fn iter<T: Component + 'static>(&self) -> impl Iterator<Item = &T> {
-        self.components.as_slice().iter()
+    pub fn as_slice<T: Component + 'static>(&self) -> Ref<'_, [T]> {
+        Ref::map(self.components.borrow(), |components| components.as_slice())
     }
 
-    pub fn len(&self) -> usize {
-        self.entities.len()
+    pub fn as_slice_mut<T: Component + 'static>(&self) -> RefMut<'_, [T]> {
+        RefMut::map(self.components.borrow_mut(), |components| {
+            components.as_slice_mut()
+        })
     }
 
-    pub fn attach<T: Component + 'static>(&mut self, entity: Entity, component: T) {
+    pub fn attach<T: Component + 'static>(&self, entity: Entity, component: T) {
         assert_eq!(self.info.ty, TypeId::of::<T>());
 
-        self.entities.push(entity);
-        self.components.push(component);
+        self.entities.borrow_mut().push(entity);
+        self.components.borrow_mut().push(component);
     }
 }

@@ -1,3 +1,5 @@
+#![allow(clippy::missing_panics_doc)]
+
 use proc_macro::TokenStream;
 use syn::{DeriveInput, ItemFn, parse_macro_input};
 
@@ -19,12 +21,9 @@ pub fn init(_attr: TokenStream, input: TokenStream) -> TokenStream {
     let parsed = parse_macro_input!(input as ItemFn);
     let ident = parsed.sig.ident.to_string();
 
-    format!(
-        "{input_str} qube_core::register_initialiser!(register_{0}, {0});",
-        ident
-    )
-    .parse()
-    .unwrap()
+    format!("{input_str} qube_core::register_initialiser!(register_{ident}, {ident});",)
+        .parse()
+        .unwrap()
 }
 
 #[proc_macro_attribute]
@@ -33,10 +32,7 @@ pub fn system(_attr: TokenStream, input: TokenStream) -> TokenStream {
     let parsed = parse_macro_input!(input as ItemFn);
     let ident = parsed.sig.ident.to_string();
 
-    format!(
-        "{input_str} qube_core::register_system!(register_{0}, {0});",
-        ident
-    )
-    .parse()
-    .unwrap()
+    format!("{input_str} qube_core::register_system!(register_{ident}, {ident});",)
+        .parse()
+        .unwrap()
 }

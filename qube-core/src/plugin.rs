@@ -23,7 +23,8 @@ pub struct Plugin {
 }
 
 impl Plugin {
-    pub fn new(name: PluginName) -> Self {
+    #[must_use]
+    pub const fn new(name: PluginName) -> Self {
         Self {
             name,
             components: Vec::new(),
@@ -32,23 +33,26 @@ impl Plugin {
         }
     }
 
+    #[must_use]
     pub fn with_components(mut self, components: &[ComponentInfo]) -> Self {
         self.components.extend_from_slice(components);
         self
     }
 
+    #[must_use]
     pub fn with_initialisers(mut self, initialisers: &[fn(&mut World)]) -> Self {
         self.initialisers.extend_from_slice(initialisers);
         self
     }
 
+    #[must_use]
     pub fn with_systems(mut self, systems: &[fn(&World)]) -> Self {
         self.systems.extend_from_slice(systems);
         self
     }
 }
 
-pub(crate) struct LoadedPlugin {
+pub struct LoadedPlugin {
     plugin: Plugin,
     pub(crate) path: PathBuf,
     iteration: usize,
@@ -64,7 +68,7 @@ impl Deref for LoadedPlugin {
 }
 
 impl LoadedPlugin {
-    fn new(plugin: Plugin, path: PathBuf, iteration: usize, library: Library) -> Self {
+    const fn new(plugin: Plugin, path: PathBuf, iteration: usize, library: Library) -> Self {
         Self {
             plugin,
             path,
@@ -73,7 +77,7 @@ impl LoadedPlugin {
         }
     }
 
-    pub(crate) fn reload(&self) -> Result<LoadedPlugin, LoadPluginError> {
+    pub(crate) fn reload(&self) -> Result<Self, LoadPluginError> {
         std::fs::remove_file(self.path.with_added_extension(self.iteration.to_string()))?;
         unsafe { load_plugin(&self.path, self.iteration + 1) }
     }
@@ -93,7 +97,7 @@ unsafe fn load_plugin<P: AsRef<Path>>(
 ) -> Result<LoadedPlugin, LoadPluginError> {
     let path = path.as_ref();
     let iteration_path = path.with_added_extension(iteration.to_string());
-    std::fs::copy(&path, &iteration_path)?;
+    std::fs::copy(path, &iteration_path)?;
 
     let library = unsafe { Library::new(iteration_path)? };
     let setup = unsafe { library.get::<Symbol<extern "C" fn() -> Plugin>>(b"setup")? };
@@ -107,9 +111,9 @@ unsafe fn load_plugin<P: AsRef<Path>>(
     ))
 }
 
-pub(crate) fn load_plugins(world: &mut World, paths: &[PathBuf]) {
+pub fn load_plugins(world: &mut World, paths: &[PathBuf]) {
     paths
-        .into_iter()
+        .iter()
         .filter(|path| {
             path.extension()
                 .is_some_and(|ext| ext == DYNAMIC_LIBRARY_EXTENSION)
@@ -117,7 +121,7 @@ pub(crate) fn load_plugins(world: &mut World, paths: &[PathBuf]) {
         .for_each(|path| world.register(unsafe { load_plugin(path, 0).unwrap() }));
 }
 
-pub(crate) fn reload_plugin<P: AsRef<Path>>(world: &mut World, path: P) {
+pub fn reload_plugin<P: AsRef<Path>>(world: &mut World, path: P) {
     let plugin = world.unregister_by_path(path.as_ref());
     world.register(plugin.reload().unwrap());
 }
@@ -152,6 +156,7 @@ macro_rules! setup_plugin {
 }
 
 #[macro_export]
+#[allow(clippy::crate_in_macro_def)]
 macro_rules! register_initialiser {
     ($ident:ident, $initialiser:ident) => {
         #[qube_core::ctor]
@@ -162,6 +167,7 @@ macro_rules! register_initialiser {
 }
 
 #[macro_export]
+#[allow(clippy::crate_in_macro_def)]
 macro_rules! register_system {
     ($ident:ident, $system:ident) => {
         #[qube_core::ctor]

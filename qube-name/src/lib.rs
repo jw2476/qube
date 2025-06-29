@@ -12,8 +12,13 @@ pub fn spawn(world: &mut World) {
 }
 
 #[system]
-pub fn log_all_names(query: Query<Name>) {
+pub fn log_all_names(query: Query<&Name>) {
     query.iter().for_each(|name| info!("{name:?}"))
+}
+
+#[system]
+pub fn add_a_to_names(query: Query<&mut Name>) {
+    query.iter().for_each(|mut name| *name = Name(format!("{}a", name.0)))
 }
 
 setup_plugin!();

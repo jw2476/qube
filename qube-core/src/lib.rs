@@ -25,10 +25,7 @@ use std::{
 };
 
 use log::debug;
-use notify::{
-    RecursiveMode, Watcher,
-    event::{CreateKind},
-};
+use notify::{RecursiveMode, Watcher, event::CreateKind};
 use thiserror::Error;
 
 pub use ctor::ctor;
@@ -52,7 +49,7 @@ pub struct Manifest {
     pub required_plugins: Vec<PluginName>,
 }
 
-pub fn run(manifest: Manifest) -> Result<(), SetupError> {
+pub fn run(manifest: &Manifest) -> Result<(), SetupError> {
     if let Err(e) = env_logger::try_init() {
         eprintln!("Failed to set up logging on main thread: {e}");
     }
@@ -67,7 +64,7 @@ pub fn run(manifest: Manifest) -> Result<(), SetupError> {
     let plugins = manifest
         .required_plugins
         .iter()
-        .map(|name| exe_folder.join(library_filename(&name.0)))
+        .map(|name| exe_folder.join(library_filename(name.0)))
         .collect::<Vec<_>>();
 
     load_plugins(&mut world.lock().unwrap(), &plugins);
@@ -78,13 +75,12 @@ pub fn run(manifest: Manifest) -> Result<(), SetupError> {
             return;
         };
 
-        match event.kind {
-            notify::EventKind::Create(CreateKind::File) => event
+        if event.kind == notify::EventKind::Create(CreateKind::File) {
+            event
                 .paths
                 .into_iter()
                 .filter(|path| plugins.contains(path))
-                .for_each(|path| reload_plugin(&mut world_clone.lock().unwrap(), path)),
-            _ => {}
+                .for_each(|path| reload_plugin(&mut world_clone.lock().unwrap(), path));
         }
     })?;
 

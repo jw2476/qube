@@ -31,7 +31,7 @@ impl World {
         }
     }
 
-    pub(crate) fn tick(&mut self) {
+    pub(crate) fn tick(&self) {
         self.plugins
             .iter()
             .flat_map(|plugin| &plugin.systems)
@@ -42,24 +42,31 @@ impl World {
         self.components
             .iter()
             .find(|set| set.info.ty == TypeId::of::<T>())
-            .expect(&format!(
-                "Tried to attach unregistered component type {}",
-                type_name::<T>()
-            ))
+            .unwrap_or_else(|| {
+                panic!(
+                    "Tried to use unregistered component type {}",
+                    type_name::<T>()
+                )
+            })
     }
 
     pub(crate) fn components_mut<T: Component + 'static>(&mut self) -> &mut ComponentSet {
         self.components
             .iter_mut()
             .find(|set| set.info.ty == TypeId::of::<T>())
-            .expect(&format!(
-                "Tried to attach unregistered component type {}",
-                type_name::<T>()
-            ))
+            .unwrap_or_else(|| {
+                panic!(
+                    "Tried to use unregistered component type {}",
+                    type_name::<T>()
+                )
+            })
     }
 
     pub fn attach<T: Component + 'static>(&mut self, entity: Entity, component: T) {
-        assert_eq!(entity.generation, self.entities[entity.index.0 as usize]);
+        assert_eq!(
+            entity.generation,
+            self.entities[usize::try_from(entity.index.0).unwrap()]
+        );
         self.components_mut::<T>().attach(entity, component);
     }
 
@@ -67,7 +74,7 @@ impl World {
         plugin.components.iter().copied().for_each(|info| {
             debug!("Registered: {}", info.name);
             self.components
-                .push(ComponentSet::new(Global::default(), info))
+                .push(ComponentSet::new(Global, info));
         });
 
         plugin
