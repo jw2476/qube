@@ -1,5 +1,5 @@
 [package]
-name = "qube"
+name = "qube-name"
 version.workspace = true
 edition.workspace = true
 description.workspace = true
@@ -9,10 +9,12 @@ license.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
-log = "0.4.27"
+ctor = "0.4.2"
 qube-core = { version = "0.1.0", path = "../qube-core" }
 
 [lints]
 workspace = true
-

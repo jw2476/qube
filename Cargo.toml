@@ -1,4 +1,20 @@
 [workspace]
 resolver = "2"
-members = ["qube"]
+members = ["qube", "qube-core", "qube-core-macros", "qube-name"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A modular, extensible application engine with a focus on the developer experience."
+repository = "https://github.com/jw2476/qube"
+readme = "README.md"
+keywords = ["gamedev", "graphics", "engine"]
+categories = ["game-development", "game-engines", "games", "gui", "rendering"]
+
+[workspace.lints.clippy]
+cargo = "warn"
+nursery = "warn"
+pedantic = "warn"
+multiple-crate-versions = { level = "allow", priority = 1 }
 
