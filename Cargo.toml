@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = ["server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Jack Whitehorn"]
+description = "A blazingly fast vanilla-compatible Minecraft server"
+repository = "https://github.com/jw2476/qube"
+license = "GPL-3.0"
+readme = "README.md"
+keywords = ["server", "minecraft", "networking"]
+categories = ["games"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+nursery = "warn"
+pedantic = "warn"
+cargo = "warn"
+correctness = "warn"
+perf = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+multiple-crate-versions = { level = "allow", priority = 1 }
+missing-errors-doc = { level = "allow", priority = 1 }
+
