@@ -274,6 +274,29 @@ fn decode_handshake(mut packet: impl Read) -> std::io::Result<ServerboundPacket>
     })
 }
 
+/// Decodes a serverbound status packet from the provided reader.
+///
+/// Recognizes the following opcodes read as a VarInt:
+/// - `0x0`: returns `ServerboundPacket::StatusRequest`.
+/// - `0x1`: reads an `i64` and returns `ServerboundPacket::PingRequest(timestamp)`.
+/// Other opcodes are not handled by this implementation.
+///
+/// # Returns
+///
+/// `ServerboundPacket` parsed from the reader: `StatusRequest` for opcode `0x0`, or `PingRequest(timestamp)` for opcode `0x1`.
+///
+/// # Examples
+///
+/// ```
+/// use std::io::Cursor;
+/// // Opcode 0x1 (VarInt single byte 0x01) followed by an i64 timestamp (big-endian)
+/// let data = [0x01u8, 0, 0, 0, 0, 0, 0, 0, 5];
+/// let pkt = super::decode_status(Cursor::new(&data)).unwrap();
+/// match pkt {
+///     super::ServerboundPacket::PingRequest(ts) => assert_eq!(ts, 5),
+///     _ => panic!("expected PingRequest"),
+/// }
+/// ```
 fn decode_status(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
     let opcode = packet.read_varint()?;
     match opcode {
@@ -283,6 +306,28 @@ fn decode_status(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
     }
 }
 
+/// Dispatches packet decoding according to the current protocol mode.
+///
+/// Given a reader containing a single packet's bytes, decodes and returns the appropriate
+/// ServerboundPacket for the supplied ProtocolMode.
+///
+/// # Errors
+///
+/// Returns an `std::io::Error` if reading from the provided `Read` fails or if the packet
+/// is malformed for the expected protocol.
+///
+/// # Examples
+///
+/// ```
+/// use std::io::Cursor;
+///
+/// let buf = Cursor::new([0x00u8]); // opcode 0x00 => StatusRequest in Status mode
+/// let pkt = read_packet(buf, ProtocolMode::Status).unwrap();
+/// match pkt {
+///     ServerboundPacket::StatusRequest => (),
+///     _ => panic!("expected StatusRequest"),
+/// }
+/// ```
 fn read_packet(packet: impl Read, protocol: ProtocolMode) -> std::io::Result<ServerboundPacket> {
     match protocol {
         ProtocolMode::Handshake => decode_handshake(packet),
@@ -313,6 +358,24 @@ pub struct Client {
 }
 
 impl Client {
+    /// Sends a `ClientboundPacket` to the connected peer.
+    ///
+    /// The packet is serialized into bytes, prefixed with its VarInt length, and written to the client's TCP stream.
+    /// Returns an `Err` if the packet body is too large to encode as an `i32` or if any I/O operation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use tokio::net::TcpStream;
+    /// # use crate::{Client, ClientboundPacket, ProtocolMode};
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let stream = TcpStream::connect("127.0.0.1:25565").await?;
+    /// let mut client = Client { stream, protocol_mode: ProtocolMode::Handshake };
+    /// client.send(ClientboundPacket::PongResponse(42)).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn send(&mut self, packet: ClientboundPacket) -> std::io::Result<()> {
         let mut buffer = Cursor::new(Vec::new());
         write_packet(&mut buffer, packet)?;
@@ -360,6 +423,26 @@ fn invalid_data(message: &'static str) -> std::io::Error {
     std::io::Error::new(ErrorKind::InvalidData, message)
 }
 
+/// Process a client TCP connection, reading framed packets and handling them until the connection ends or an error occurs.
+///
+/// This function runs the connection loop for a single client: it repeatedly reads a VarInt length, reads that many bytes as a packet payload, decodes the packet according to the client's current protocol mode, and dispatches it to the handler which may update the client's state or send responses. It returns an I/O error when socket operations fail or when a decoded length is invalid (e.g., negative).
+///
+/// # Errors
+///
+/// Returns an `Err(std::io::Error)` if reading from or writing to the socket fails, if a packet length is negative, or if packet decoding/handling fails.
+///
+/// # Examples
+///
+/// ```ignore
+/// use tokio::net::TcpStream;
+///
+/// #[tokio::main]
+/// async fn main() -> std::io::Result<()> {
+///     let std_stream = std::net::TcpStream::connect("127.0.0.1:25565")?;
+///     let tcp = TcpStream::from_std(std_stream)?;
+///     process_socket(tcp).await
+/// }
+/// ```
 async fn process_socket(stream: TcpStream) -> std::io::Result<()> {
     let mut client = Client {
         stream,
@@ -383,6 +466,26 @@ async fn process_socket(stream: TcpStream) -> std::io::Result<()> {
     }
 }
 
+/// Starts the TCP server on 0.0.0.0:25565 and processes incoming client connections.
+///
+/// The server initializes logging, binds a listener, and spawns a task for each accepted
+/// connection that delegates to `process_socket`. Each connection task logs and ignores
+/// errors returned from `process_socket`.
+///
+/// # Returns
+///
+/// `Ok(())` if the server loop exits cleanly; an `Err(std::io::Error)` if binding, accepting,
+/// or awaiting spawned tasks fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Starts the server (not run during doctests).
+/// #[tokio::main]
+/// async fn run() -> std::io::Result<()> {
+///     main().await
+/// }
+/// ```
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     pretty_env_logger::init();
