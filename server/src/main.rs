@@ -248,6 +248,12 @@ pub enum ClientboundPacket {
     PongResponse(i64),
 }
 
+/// Decodes a serverbound packet using the Handshake protocol from the provided reader.
+///
+/// # Returns
+///
+/// `ServerboundPacket` parsed from the reader.
+///
 fn decode_handshake(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
     let 0x0 = packet.read_varint()? else {
         return Err(invalid_data("Handshake opcode must be 0x0"));
@@ -274,16 +280,11 @@ fn decode_handshake(mut packet: impl Read) -> std::io::Result<ServerboundPacket>
     })
 }
 
-/// Decodes a serverbound status packet from the provided reader.
-///
-/// Recognizes the following opcodes read as a VarInt:
-/// - `0x0`: returns `ServerboundPacket::StatusRequest`.
-/// - `0x1`: reads an `i64` and returns `ServerboundPacket::PingRequest(timestamp)`.
-/// Other opcodes are not handled by this implementation.
+/// Decodes a serverbound packet using the Status protocol from the provided reader.
 ///
 /// # Returns
 ///
-/// `ServerboundPacket` parsed from the reader: `StatusRequest` for opcode `0x0`, or `PingRequest(timestamp)` for opcode `0x1`.
+/// `ServerboundPacket` parsed from the reader.
 ///
 /// # Examples
 ///
@@ -323,10 +324,7 @@ fn decode_status(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
 ///
 /// let buf = Cursor::new([0x00u8]); // opcode 0x00 => StatusRequest in Status mode
 /// let pkt = read_packet(buf, ProtocolMode::Status).unwrap();
-/// match pkt {
-///     ServerboundPacket::StatusRequest => (),
-///     _ => panic!("expected StatusRequest"),
-/// }
+/// assert_eq!(pkt, ServerboundPacket::StatusRequest);
 /// ```
 fn read_packet(packet: impl Read, protocol: ProtocolMode) -> std::io::Result<ServerboundPacket> {
     match protocol {
@@ -360,7 +358,7 @@ pub struct Client {
 impl Client {
     /// Sends a `ClientboundPacket` to the connected peer.
     ///
-    /// The packet is serialized into bytes, prefixed with its VarInt length, and written to the client's TCP stream.
+    /// The packet is serialized into bytes, prefixed with its length as a varint, and written to the client's TCP stream.
     /// Returns an `Err` if the packet body is too large to encode as an `i32` or if any I/O operation fails.
     ///
     /// # Examples
@@ -438,8 +436,7 @@ fn invalid_data(message: &'static str) -> std::io::Error {
 ///
 /// #[tokio::main]
 /// async fn main() -> std::io::Result<()> {
-///     let std_stream = std::net::TcpStream::connect("127.0.0.1:25565")?;
-///     let tcp = TcpStream::from_std(std_stream)?;
+///     let tcp = TcpStream::connect("127.0.0.1:25565")?;
 ///     process_socket(tcp).await
 /// }
 /// ```
@@ -468,24 +465,10 @@ async fn process_socket(stream: TcpStream) -> std::io::Result<()> {
 
 /// Starts the TCP server on 0.0.0.0:25565 and processes incoming client connections.
 ///
-/// The server initializes logging, binds a listener, and spawns a task for each accepted
+/// The server binds a listener, and spawns a task for each accepted
 /// connection that delegates to `process_socket`. Each connection task logs and ignores
 /// errors returned from `process_socket`.
 ///
-/// # Returns
-///
-/// `Ok(())` if the server loop exits cleanly; an `Err(std::io::Error)` if binding, accepting,
-/// or awaiting spawned tasks fails.
-///
-/// # Examples
-///
-/// ```no_run
-/// // Starts the server (not run during doctests).
-/// #[tokio::main]
-/// async fn run() -> std::io::Result<()> {
-///     main().await
-/// }
-/// ```
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     pretty_env_logger::init();
@@ -504,3 +487,4 @@ async fn main() -> std::io::Result<()> {
         .await?;
     }
 }
+
