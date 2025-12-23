@@ -409,8 +409,12 @@ async fn main() -> std::io::Result<()> {
     loop {
         let (socket, addr) = listener.accept().await?;
         tokio::spawn(async move {
-            if let Err(e) = process_socket(socket, addr).await {
-                warn!("Closed connection to {addr} due to {e}");
+            match process_socket(socket, addr).await {
+                Ok(()) => info!("Client at {addr} disconnected"),
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    info!("Client at {addr} disconnected");
+                }
+                Err(e) => warn!("Closed connection to {addr} due to {e}"),
             }
         });
     }
