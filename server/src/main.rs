@@ -1,4 +1,7 @@
-use std::io::{Cursor, ErrorKind, Read, Write};
+use std::{
+    io::{Cursor, ErrorKind, Read, Write},
+    net::SocketAddr,
+};
 
 use log::{debug, info, warn};
 use serde::Serialize;
@@ -292,9 +295,9 @@ fn decode_handshake(mut packet: impl Read) -> std::io::Result<ServerboundPacket>
 /// use std::io::Cursor;
 /// // Opcode 0x1 (VarInt single byte 0x01) followed by an i64 timestamp (big-endian)
 /// let data = [0x01u8, 0, 0, 0, 0, 0, 0, 0, 5];
-/// let pkt = super::decode_status(Cursor::new(&data)).unwrap();
+/// let pkt = decode_status(Cursor::new(&data)).unwrap();
 /// match pkt {
-///     super::ServerboundPacket::PingRequest(ts) => assert_eq!(ts, 5),
+///     ServerboundPacket::PingRequest(ts) => assert_eq!(ts, 5),
 ///     _ => panic!("expected PingRequest"),
 /// }
 /// ```
@@ -440,12 +443,12 @@ fn invalid_data(message: &'static str) -> std::io::Error {
 ///     process_socket(tcp).await
 /// }
 /// ```
-async fn process_socket(stream: TcpStream) -> std::io::Result<()> {
+async fn process_socket(stream: TcpStream, addr: SocketAddr) -> std::io::Result<()> {
     let mut client = Client {
         stream,
         protocol_mode: ProtocolMode::Handshake,
     };
-    info!("Client connected");
+    info!("Client at {addr} connected");
 
     loop {
         let length = client.stream.read_varint().await?;
@@ -480,10 +483,9 @@ async fn main() -> std::io::Result<()> {
     loop {
         let (socket, addr) = listener.accept().await?;
         tokio::spawn(async move {
-            if let Err(e) = process_socket(socket).await {
+            if let Err(e) = process_socket(socket, addr).await {
                 warn!("Closed connection to {addr} due to {e}");
             }
-        })
-        .await?;
+        });
     }
 }
