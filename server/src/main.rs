@@ -1,5 +1,6 @@
 use std::io::{Cursor, ErrorKind, Read, Write};
 
+use log::{debug, info, warn};
 use serde::Serialize;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -283,7 +284,6 @@ fn decode_status(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
 }
 
 fn read_packet(packet: impl Read, protocol: ProtocolMode) -> std::io::Result<ServerboundPacket> {
-    println!("{protocol:?}");
     match protocol {
         ProtocolMode::Handshake => decode_handshake(packet),
         ProtocolMode::Status => decode_status(packet),
@@ -317,7 +317,6 @@ impl Client {
         let mut buffer = Cursor::new(Vec::new());
         write_packet(&mut buffer, packet)?;
         let body = buffer.into_inner();
-        println!("{body:?}");
 
         let Ok(length) = i32::try_from(body.len()) else {
             return Err(invalid_data("Packet body too long"));
@@ -366,7 +365,7 @@ async fn process_socket(stream: TcpStream) -> std::io::Result<()> {
         stream,
         protocol_mode: ProtocolMode::Handshake,
     };
-    println!("Client connected");
+    info!("Client connected");
 
     loop {
         let length = client.stream.read_varint().await?;
@@ -378,7 +377,7 @@ async fn process_socket(stream: TcpStream) -> std::io::Result<()> {
         client.stream.read_exact(&mut buffer).await?;
 
         let packet = read_packet(Cursor::new(buffer), client.protocol_mode)?;
-        println!("{packet:?}");
+        debug!("{packet:?}");
 
         handle(packet, &mut client).await?;
     }
@@ -386,15 +385,17 @@ async fn process_socket(stream: TcpStream) -> std::io::Result<()> {
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    pretty_env_logger::init();
+
     let listener = TcpListener::bind("0.0.0.0:25565").await?;
 
-    println!("Listening on 0.0.0.0:25565");
+    info!("Listening on 0.0.0.0:25565");
 
     loop {
         let (socket, addr) = listener.accept().await?;
         tokio::spawn(async move {
             if let Err(e) = process_socket(socket).await {
-                println!("Closed connection to {addr} due to {e}");
+                warn!("Closed connection to {addr} due to {e}");
             }
         })
         .await?;
