@@ -27,7 +27,7 @@ impl<T: AsyncReadExt + Unpin> AsyncReadVarInt for T {
             }
         }
 
-        todo!()
+        Err(invalid_data("Invalid varint"))
     }
 }
 
@@ -97,7 +97,7 @@ impl<T: Read> ReadExt for T {
             }
         }
 
-        todo!()
+        Err(invalid_data("Invalid varint"))
     }
 
     fn read_varlong(&mut self) -> std::io::Result<i64> {
@@ -112,7 +112,7 @@ impl<T: Read> ReadExt for T {
             }
         }
 
-        todo!()
+        Err(invalid_data("Invalid varlong"))
     }
 
     fn read_string(&mut self) -> std::io::Result<String> {
@@ -284,7 +284,7 @@ fn decode_status(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
     match opcode {
         0x0 => Ok(ServerboundPacket::StatusRequest),
         0x1 => packet.read_i64().map(ServerboundPacket::PingRequest),
-        _ => todo!(),
+        _ => Err(invalid_data("Unknown status opcode")),
     }
 }
 
@@ -293,7 +293,7 @@ fn read_packet(packet: impl Read, protocol: ProtocolMode) -> std::io::Result<Ser
     match protocol {
         ProtocolMode::Handshake => decode_handshake(packet),
         ProtocolMode::Status => decode_status(packet),
-        _ => todo!(),
+        _ => Err(invalid_data("Unknown protocol mode")),
     }
 }
 
