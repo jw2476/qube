@@ -1,4 +1,5 @@
 use std::{
+    fmt::Display,
     io::{Cursor, ErrorKind, Read, Write},
     net::SocketAddr,
 };
@@ -9,6 +10,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+use uuid::Uuid;
 
 pub trait AsyncReadVarInt: AsyncReadExt {
     fn read_varint(&mut self) -> impl Future<Output = std::io::Result<i32>>;
@@ -57,6 +59,7 @@ impl<T: AsyncWriteExt + Unpin> AsyncWriteVarInt for T {
 pub trait ReadExt: Read {
     fn read_u8(&mut self) -> std::io::Result<u8>;
     fn read_u16(&mut self) -> std::io::Result<u16>;
+    fn read_u128(&mut self) -> std::io::Result<u128>;
 
     fn read_i64(&mut self) -> std::io::Result<i64>;
 
@@ -77,6 +80,12 @@ impl<T: Read> ReadExt for T {
         let mut buffer = [0; 2];
         self.read_exact(&mut buffer)?;
         Ok(u16::from_be_bytes(buffer))
+    }
+
+    fn read_u128(&mut self) -> std::io::Result<u128> {
+        let mut buffer = [0; 16];
+        self.read_exact(&mut buffer)?;
+        Ok(u128::from_be_bytes(buffer))
     }
 
     fn read_i64(&mut self) -> std::io::Result<i64> {
@@ -133,8 +142,11 @@ impl<T: Read> ReadExt for T {
 pub trait WriteExt: Write {
     fn write_u8(&mut self, value: u8) -> std::io::Result<()>;
     fn write_u16(&mut self, value: u16) -> std::io::Result<()>;
+    fn write_u128(&mut self, value: u128) -> std::io::Result<()>;
 
     fn write_i64(&mut self, value: i64) -> std::io::Result<()>;
+
+    fn write_bool(&mut self, value: bool) -> std::io::Result<()>;
 
     fn write_varint(&mut self, value: i32) -> std::io::Result<()>;
     fn write_varlong(&mut self, value: i64) -> std::io::Result<()>;
@@ -151,8 +163,16 @@ impl<T: Write> WriteExt for T {
         self.write_all(&value.to_be_bytes())
     }
 
+    fn write_u128(&mut self, value: u128) -> std::io::Result<()> {
+        self.write_all(&value.to_be_bytes())
+    }
+
     fn write_i64(&mut self, value: i64) -> std::io::Result<()> {
         self.write_all(&value.to_be_bytes())
+    }
+
+    fn write_bool(&mut self, value: bool) -> std::io::Result<()> {
+        self.write_u8(if value { 1 } else { 0 })
     }
 
     fn write_varint(&mut self, mut value: i32) -> std::io::Result<()> {
@@ -221,6 +241,29 @@ pub struct PingRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Identifier {
+    namespace: String,
+    value: String,
+}
+
+impl Display for Identifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.namespace, self.value)
+    }
+}
+
+impl<T: AsRef<str>> From<T> for Identifier {
+    fn from(value: T) -> Self {
+        let value = value.as_ref();
+        let (namespace, value) = value.split_once(':').unwrap_or(("minecraft", value));
+        Self {
+            namespace: namespace.to_string(),
+            value: value.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServerboundPacket {
     Handshake {
         protocol_version: i32,
@@ -230,6 +273,15 @@ pub enum ServerboundPacket {
     },
     StatusRequest,
     PingRequest(i64),
+    LoginStart {
+        name: String,
+        uuid: Uuid,
+    },
+    LoginAcknowledged,
+    PluginMessage {
+        channel: Identifier,
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -246,9 +298,21 @@ pub struct ServerStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GameProfileProperty {
+    name: String,
+    value: String,
+    signature: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientboundPacket {
     StatusResponse(ServerStatus),
     PongResponse(i64),
+    LoginSuccess {
+        uuid: Uuid,
+        name: String,
+        properties: Vec<GameProfileProperty>,
+    },
 }
 
 /// Decodes a serverbound packet using the Handshake protocol from the provided reader.
@@ -284,7 +348,35 @@ fn decode_status(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
     match opcode {
         0x0 => Ok(ServerboundPacket::StatusRequest),
         0x1 => packet.read_i64().map(ServerboundPacket::PingRequest),
-        _ => Err(invalid_data("Unknown status opcode")),
+        other => Err(invalid_data(&format!("Unknown status opcode: {other}"))),
+    }
+}
+
+fn decode_login(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
+    let opcode = packet.read_varint()?;
+    match opcode {
+        0x0 => {
+            let name = packet.read_string()?;
+            let uuid = Uuid::from_u128(packet.read_u128()?);
+            Ok(ServerboundPacket::LoginStart { name, uuid })
+        }
+        0x3 => Ok(ServerboundPacket::LoginAcknowledged),
+        other => Err(invalid_data(&format!("Unknown login opcode: {other}"))),
+    }
+}
+
+fn decode_configuration(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
+    let opcode = packet.read_varint()?;
+    match opcode {
+        0x02 => {
+            let channel = Identifier::from(packet.read_string()?);
+            let mut data = Vec::new();
+            packet.read_to_end(&mut data)?;
+            Ok(ServerboundPacket::PluginMessage { channel, data })
+        }
+        other => Err(invalid_data(&format!(
+            "Unknown configuration opcode: {other}"
+        ))),
     }
 }
 
@@ -293,6 +385,8 @@ fn read_packet(packet: impl Read, protocol: ProtocolMode) -> std::io::Result<Ser
     match protocol {
         ProtocolMode::Handshake => decode_handshake(packet),
         ProtocolMode::Status => decode_status(packet),
+        ProtocolMode::Login => decode_login(packet),
+        ProtocolMode::Configuration => decode_configuration(packet),
         _ => Err(invalid_data("Unknown protocol mode")),
     }
 }
@@ -307,6 +401,29 @@ fn write_packet(mut buffer: impl Write, packet: ClientboundPacket) -> std::io::R
             buffer.write_varint(0x1)?;
             buffer.write_i64(payload)?;
         }
+        ClientboundPacket::LoginSuccess {
+            uuid,
+            name,
+            properties,
+        } => {
+            buffer.write_varint(0x2)?;
+            buffer.write_u128(uuid.as_u128())?;
+            buffer.write_string(&name)?;
+
+            let Ok(properties_len) = i32::try_from(properties.len()) else {
+                return Err(invalid_data("Too many game profile properties"));
+            };
+
+            buffer.write_varint(properties_len)?;
+            for property in properties {
+                buffer.write_string(&property.name)?;
+                buffer.write_string(&property.value)?;
+                buffer.write_bool(property.signature.is_some())?;
+                if let Some(signature) = property.signature {
+                    buffer.write_string(&signature)?;
+                }
+            }
+        }
     }
 
     Ok(())
@@ -316,11 +433,14 @@ fn write_packet(mut buffer: impl Write, packet: ClientboundPacket) -> std::io::R
 struct Client {
     stream: TcpStream,
     protocol_mode: ProtocolMode,
+    brand: Option<String>,
 }
 
 impl Client {
     /// Sends a `ClientboundPacket` to the connected peer. The packet is serialized into bytes, prefixed with its length as a varint, and written to the client's TCP stream.
     async fn send(&mut self, packet: ClientboundPacket) -> std::io::Result<()> {
+        debug!("Sending: {packet:?}");
+
         let mut buffer = Cursor::new(Vec::new());
         write_packet(&mut buffer, packet)?;
         let body = buffer.into_inner();
@@ -358,12 +478,33 @@ async fn handle(packet: ServerboundPacket, client: &mut Client) -> std::io::Resu
                 .send(ClientboundPacket::PongResponse(payload))
                 .await?;
         }
+        ServerboundPacket::LoginStart { name, uuid } => {
+            client
+                .send(ClientboundPacket::LoginSuccess {
+                    uuid,
+                    name,
+                    properties: Vec::new(),
+                })
+                .await?;
+        }
+        ServerboundPacket::LoginAcknowledged => client.protocol_mode = ProtocolMode::Configuration,
+        ServerboundPacket::PluginMessage { channel, data }
+            if channel == Identifier::from("brand") =>
+        {
+            let mut data = Cursor::new(data);
+            let brand = data.read_string()?;
+            info!("Client brand: {brand}");
+            client.brand = Some(brand);
+        }
+        ServerboundPacket::PluginMessage { channel, .. } => {
+            warn!("Unknown plugin channel: {channel}")
+        }
     }
 
     Ok(())
 }
 
-fn invalid_data(message: &'static str) -> std::io::Error {
+fn invalid_data(message: &str) -> std::io::Error {
     std::io::Error::new(ErrorKind::InvalidData, message)
 }
 
@@ -374,6 +515,7 @@ async fn process_socket(stream: TcpStream, addr: SocketAddr) -> std::io::Result<
     let mut client = Client {
         stream,
         protocol_mode: ProtocolMode::Handshake,
+        brand: None,
     };
     info!("Client at {addr} connected");
 
@@ -387,7 +529,7 @@ async fn process_socket(stream: TcpStream, addr: SocketAddr) -> std::io::Result<
         client.stream.read_exact(&mut buffer).await?;
 
         let packet = read_packet(Cursor::new(buffer), client.protocol_mode)?;
-        debug!("{packet:?}");
+        debug!("Received: {packet:?}");
 
         handle(packet, &mut client).await?;
     }
