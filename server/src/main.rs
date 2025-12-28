@@ -1,4 +1,5 @@
 use std::{
+    error::Error,
     fmt::Display,
     io::{Cursor, ErrorKind, Read, Write},
     net::SocketAddr,
@@ -246,20 +247,69 @@ pub struct Identifier {
     value: String,
 }
 
+impl Identifier {
+    pub fn minecraft<T: AsRef<str>>(value: T) -> Self {
+        Self {
+            namespace: "minecraft".to_string(),
+            value: value.as_ref().to_string(),
+        }
+    }
+}
+
 impl Display for Identifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.namespace, self.value)
     }
 }
 
-impl<T: AsRef<str>> From<T> for Identifier {
-    fn from(value: T) -> Self {
-        let value = value.as_ref();
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IdentifierParseError {
+    InvalidNamespace,
+    InvalidValue,
+}
+
+impl Display for IdentifierParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "failed to parse identifier due to {}",
+            match self {
+                Self::InvalidNamespace => "invalid namespace",
+                Self::InvalidValue => "invalid value",
+            }
+        )
+    }
+}
+
+impl Error for IdentifierParseError {}
+
+impl TryFrom<&str> for Identifier {
+    type Error = IdentifierParseError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         let (namespace, value) = value.split_once(':').unwrap_or(("minecraft", value));
-        Self {
+
+        if !namespace.chars().all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-' || c == '_'
+        }) {
+            return Err(IdentifierParseError::InvalidNamespace);
+        }
+
+        if !value.chars().all(|c| {
+            c.is_ascii_lowercase()
+                || c.is_ascii_digit()
+                || c == '.'
+                || c == '-'
+                || c == '_'
+                || c == '/'
+        }) {
+            return Err(IdentifierParseError::InvalidValue);
+        }
+
+        Ok(Self {
             namespace: namespace.to_string(),
             value: value.to_string(),
-        }
+        })
     }
 }
 
@@ -369,7 +419,8 @@ fn decode_configuration(mut packet: impl Read) -> std::io::Result<ServerboundPac
     let opcode = packet.read_varint()?;
     match opcode {
         0x02 => {
-            let channel = Identifier::from(packet.read_string()?);
+            let channel = Identifier::try_from(packet.read_string()?.as_str())
+                .map_err(|err| invalid_data(&err.to_string()))?;
             let mut data = Vec::new();
             packet.read_to_end(&mut data)?;
             Ok(ServerboundPacket::PluginMessage { channel, data })
@@ -489,7 +540,7 @@ async fn handle(packet: ServerboundPacket, client: &mut Client) -> std::io::Resu
         }
         ServerboundPacket::LoginAcknowledged => client.protocol_mode = ProtocolMode::Configuration,
         ServerboundPacket::PluginMessage { channel, data }
-            if channel == Identifier::from("brand") =>
+            if channel == Identifier::minecraft("brand") =>
         {
             let mut data = Cursor::new(data);
             let brand = data.read_string()?;
