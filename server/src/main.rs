@@ -172,7 +172,7 @@ impl<T: Write> WriteExt for T {
     }
 
     fn write_bool(&mut self, value: bool) -> std::io::Result<()> {
-        self.write_u8(if value { 1 } else { 0 })
+        self.write_u8(value.into())
     }
 
     fn write_varint(&mut self, mut value: i32) -> std::io::Result<()> {
@@ -387,7 +387,7 @@ fn read_packet(packet: impl Read, protocol: ProtocolMode) -> std::io::Result<Ser
         ProtocolMode::Status => decode_status(packet),
         ProtocolMode::Login => decode_login(packet),
         ProtocolMode::Configuration => decode_configuration(packet),
-        _ => Err(invalid_data("Unknown protocol mode")),
+        ProtocolMode::Play => Err(invalid_data("Play protocol not supported yet")),
     }
 }
 
@@ -497,7 +497,7 @@ async fn handle(packet: ServerboundPacket, client: &mut Client) -> std::io::Resu
             client.brand = Some(brand);
         }
         ServerboundPacket::PluginMessage { channel, .. } => {
-            warn!("Unknown plugin channel: {channel}")
+            warn!("Unknown plugin channel: {channel}");
         }
     }
 
