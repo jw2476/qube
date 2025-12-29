@@ -7,11 +7,32 @@ pub struct Identifier {
 }
 
 impl Identifier {
-    pub fn minecraft<T: AsRef<str>>(value: T) -> Self {
-        Self {
-            namespace: "minecraft".to_string(),
-            value: value.as_ref().to_string(),
-        }
+    /// Get the namespace.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let brand = Identifier::try_from("minecraft:brand").unwrap();
+    /// assert_eq!(brand.namespace(), "minecraft");
+    /// ```
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    /// Get the value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let brand = Identifier::try_from("minecraft:brand").unwrap();
+    /// assert_eq!(brand.value(), "brand");
+    /// ```
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    pub fn minecraft<T: AsRef<str>>(value: T) -> Result<Self, IdentifierParseError> {
+        Self::try_from(format!("minecraft:{}", value.as_ref()).as_str())
     }
 }
 
@@ -25,6 +46,8 @@ impl Display for Identifier {
 pub enum IdentifierParseError {
     InvalidNamespace,
     InvalidValue,
+    EmptyNamespace,
+    EmptyValue,
 }
 
 impl Display for IdentifierParseError {
@@ -35,6 +58,8 @@ impl Display for IdentifierParseError {
             match self {
                 Self::InvalidNamespace => "invalid namespace",
                 Self::InvalidValue => "invalid value",
+                Self::EmptyNamespace => "empty namespace",
+                Self::EmptyValue => "empty value",
             }
         )
     }
@@ -63,6 +88,14 @@ impl TryFrom<&str> for Identifier {
                 || c == '/'
         }) {
             return Err(IdentifierParseError::InvalidValue);
+        }
+
+        if namespace.is_empty() {
+            return Err(IdentifierParseError::EmptyNamespace);
+        }
+
+        if value.is_empty() {
+            return Err(IdentifierParseError::EmptyValue);
         }
 
         Ok(Self {

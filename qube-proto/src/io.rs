@@ -161,9 +161,9 @@ impl<T: Write> WriteExt for T {
         self.write_u8(value.into())
     }
 
-    fn write_varint(&mut self, mut value: i32) -> std::io::Result<()> {
+    fn write_varint(&mut self, value: i32) -> std::io::Result<()> {
+        let mut value = value as u32;
         loop {
-            #[allow(clippy::cast_sign_loss)]
             let mut byte = (value & 0b0111_1111) as u8;
             value >>= 7;
             if value != 0 {
@@ -178,9 +178,9 @@ impl<T: Write> WriteExt for T {
         }
     }
 
-    fn write_varlong(&mut self, mut value: i64) -> std::io::Result<()> {
+    fn write_varlong(&mut self, value: i64) -> std::io::Result<()> {
+        let mut value = value as u64;
         loop {
-            #[allow(clippy::cast_sign_loss)]
             let mut byte = (value & 0b0111_1111) as u8;
             value >>= 7;
             if value != 0 {
