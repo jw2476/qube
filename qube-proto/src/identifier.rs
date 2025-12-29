@@ -15,6 +15,7 @@ impl Identifier {
     /// let brand = Identifier::try_from("minecraft:brand").unwrap();
     /// assert_eq!(brand.namespace(), "minecraft");
     /// ```
+    #[must_use]
     pub fn namespace(&self) -> &str {
         &self.namespace
     }
@@ -27,6 +28,7 @@ impl Identifier {
     /// let brand = Identifier::try_from("minecraft:brand").unwrap();
     /// assert_eq!(brand.value(), "brand");
     /// ```
+    #[must_use]
     pub fn value(&self) -> &str {
         &self.value
     }
