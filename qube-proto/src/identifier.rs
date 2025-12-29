@@ -12,6 +12,7 @@ impl Identifier {
     /// # Examples
     ///
     /// ```
+    /// use qube_proto::Identifier;
     /// let brand = Identifier::try_from("minecraft:brand").unwrap();
     /// assert_eq!(brand.namespace(), "minecraft");
     /// ```
@@ -25,6 +26,7 @@ impl Identifier {
     /// # Examples
     ///
     /// ```
+    /// use qube_proto::Identifier;
     /// let brand = Identifier::try_from("minecraft:brand").unwrap();
     /// assert_eq!(brand.value(), "brand");
     /// ```
