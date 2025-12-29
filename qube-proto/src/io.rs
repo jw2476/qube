@@ -162,7 +162,7 @@ impl<T: Write> WriteExt for T {
     }
 
     fn write_varint(&mut self, value: i32) -> std::io::Result<()> {
-        let mut value = value as u32;
+        let mut value = value.cast_unsigned();
         loop {
             let mut byte = (value & 0b0111_1111) as u8;
             value >>= 7;
@@ -179,7 +179,7 @@ impl<T: Write> WriteExt for T {
     }
 
     fn write_varlong(&mut self, value: i64) -> std::io::Result<()> {
-        let mut value = value as u64;
+        let mut value = value.cast_unsigned();
         loop {
             let mut byte = (value & 0b0111_1111) as u8;
             value >>= 7;
