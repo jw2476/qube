@@ -223,12 +223,21 @@ impl Packet for LoginSuccess {
             })
         }
 
+        let uuid = Uuid::from_u128(r.read_u128()?);
+        let name = r.read_string()?;
+
+        let property_count = r.read_varint()?;
+        if property_count < 0 {
+            return Err(invalid_data("Negative game profile property count"));
+        }
+        let properties = (0..property_count)
+            .map(|_| read_property(&mut r))
+            .collect::<std::io::Result<Vec<_>>>()?;
+
         Ok(Self {
-            uuid: Uuid::from_u128(r.read_u128()?),
-            name: r.read_string()?,
-            properties: (0..r.read_varint()?)
-                .map(|_| read_property(&mut r))
-                .collect::<std::io::Result<Vec<_>>>()?,
+            uuid,
+            name,
+            properties,
         })
     }
 
@@ -297,9 +306,12 @@ macro_rules! impl_packet_group {
             }
 
             /// Write a `$name`.
-            pub fn write(self, w: impl Write) -> std::io::Result<()> {
+            pub fn write(self, mut w: impl Write) -> std::io::Result<()> {
                 match self {
-                    $($name::$variant(x) => x.write(w),)*
+                    $($name::$variant(x) => {
+                        w.write_varint(<$ty>::OPCODE)?;
+                        x.write(w)
+                    },)*
                 }
             }
         }
