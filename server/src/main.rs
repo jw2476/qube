@@ -1,10 +1,17 @@
-use std::io::{Cursor, ErrorKind, Read, Write};
+use std::{
+    error::Error,
+    fmt::Display,
+    io::{Cursor, ErrorKind, Read, Write},
+    net::SocketAddr,
+};
 
+use log::{debug, info, warn};
 use serde::Serialize;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+use uuid::Uuid;
 
 pub trait AsyncReadVarInt: AsyncReadExt {
     fn read_varint(&mut self) -> impl Future<Output = std::io::Result<i32>>;
@@ -23,7 +30,7 @@ impl<T: AsyncReadExt + Unpin> AsyncReadVarInt for T {
             }
         }
 
-        todo!()
+        Err(invalid_data("Invalid varint"))
     }
 }
 
@@ -53,6 +60,7 @@ impl<T: AsyncWriteExt + Unpin> AsyncWriteVarInt for T {
 pub trait ReadExt: Read {
     fn read_u8(&mut self) -> std::io::Result<u8>;
     fn read_u16(&mut self) -> std::io::Result<u16>;
+    fn read_u128(&mut self) -> std::io::Result<u128>;
 
     fn read_i64(&mut self) -> std::io::Result<i64>;
 
@@ -75,6 +83,12 @@ impl<T: Read> ReadExt for T {
         Ok(u16::from_be_bytes(buffer))
     }
 
+    fn read_u128(&mut self) -> std::io::Result<u128> {
+        let mut buffer = [0; 16];
+        self.read_exact(&mut buffer)?;
+        Ok(u128::from_be_bytes(buffer))
+    }
+
     fn read_i64(&mut self) -> std::io::Result<i64> {
         let mut buffer = [0; 8];
         self.read_exact(&mut buffer)?;
@@ -93,7 +107,7 @@ impl<T: Read> ReadExt for T {
             }
         }
 
-        todo!()
+        Err(invalid_data("Invalid varint"))
     }
 
     fn read_varlong(&mut self) -> std::io::Result<i64> {
@@ -108,7 +122,7 @@ impl<T: Read> ReadExt for T {
             }
         }
 
-        todo!()
+        Err(invalid_data("Invalid varlong"))
     }
 
     fn read_string(&mut self) -> std::io::Result<String> {
@@ -129,8 +143,11 @@ impl<T: Read> ReadExt for T {
 pub trait WriteExt: Write {
     fn write_u8(&mut self, value: u8) -> std::io::Result<()>;
     fn write_u16(&mut self, value: u16) -> std::io::Result<()>;
+    fn write_u128(&mut self, value: u128) -> std::io::Result<()>;
 
     fn write_i64(&mut self, value: i64) -> std::io::Result<()>;
+
+    fn write_bool(&mut self, value: bool) -> std::io::Result<()>;
 
     fn write_varint(&mut self, value: i32) -> std::io::Result<()>;
     fn write_varlong(&mut self, value: i64) -> std::io::Result<()>;
@@ -147,8 +164,16 @@ impl<T: Write> WriteExt for T {
         self.write_all(&value.to_be_bytes())
     }
 
+    fn write_u128(&mut self, value: u128) -> std::io::Result<()> {
+        self.write_all(&value.to_be_bytes())
+    }
+
     fn write_i64(&mut self, value: i64) -> std::io::Result<()> {
         self.write_all(&value.to_be_bytes())
+    }
+
+    fn write_bool(&mut self, value: bool) -> std::io::Result<()> {
+        self.write_u8(value.into())
     }
 
     fn write_varint(&mut self, mut value: i32) -> std::io::Result<()> {
@@ -217,6 +242,78 @@ pub struct PingRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Identifier {
+    namespace: String,
+    value: String,
+}
+
+impl Identifier {
+    pub fn minecraft<T: AsRef<str>>(value: T) -> Self {
+        Self {
+            namespace: "minecraft".to_string(),
+            value: value.as_ref().to_string(),
+        }
+    }
+}
+
+impl Display for Identifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.namespace, self.value)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IdentifierParseError {
+    InvalidNamespace,
+    InvalidValue,
+}
+
+impl Display for IdentifierParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "failed to parse identifier due to {}",
+            match self {
+                Self::InvalidNamespace => "invalid namespace",
+                Self::InvalidValue => "invalid value",
+            }
+        )
+    }
+}
+
+impl Error for IdentifierParseError {}
+
+impl TryFrom<&str> for Identifier {
+    type Error = IdentifierParseError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let (namespace, value) = value.split_once(':').unwrap_or(("minecraft", value));
+
+        if !namespace.chars().all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-' || c == '_'
+        }) {
+            return Err(IdentifierParseError::InvalidNamespace);
+        }
+
+        if !value.chars().all(|c| {
+            c.is_ascii_lowercase()
+                || c.is_ascii_digit()
+                || c == '.'
+                || c == '-'
+                || c == '_'
+                || c == '/'
+        }) {
+            return Err(IdentifierParseError::InvalidValue);
+        }
+
+        Ok(Self {
+            namespace: namespace.to_string(),
+            value: value.to_string(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServerboundPacket {
     Handshake {
         protocol_version: i32,
@@ -226,6 +323,15 @@ pub enum ServerboundPacket {
     },
     StatusRequest,
     PingRequest(i64),
+    LoginStart {
+        name: String,
+        uuid: Uuid,
+    },
+    LoginAcknowledged,
+    PluginMessage {
+        channel: Identifier,
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -242,11 +348,24 @@ pub struct ServerStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GameProfileProperty {
+    name: String,
+    value: String,
+    signature: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientboundPacket {
     StatusResponse(ServerStatus),
     PongResponse(i64),
+    LoginSuccess {
+        uuid: Uuid,
+        name: String,
+        properties: Vec<GameProfileProperty>,
+    },
 }
 
+/// Decodes a serverbound packet using the Handshake protocol from the provided reader.
 fn decode_handshake(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
     let 0x0 = packet.read_varint()? else {
         return Err(invalid_data("Handshake opcode must be 0x0"));
@@ -273,21 +392,53 @@ fn decode_handshake(mut packet: impl Read) -> std::io::Result<ServerboundPacket>
     })
 }
 
+/// Decodes a serverbound packet using the Status protocol from the provided reader.
 fn decode_status(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
     let opcode = packet.read_varint()?;
     match opcode {
         0x0 => Ok(ServerboundPacket::StatusRequest),
         0x1 => packet.read_i64().map(ServerboundPacket::PingRequest),
-        _ => todo!(),
+        other => Err(invalid_data(&format!("Unknown status opcode: {other}"))),
     }
 }
 
+fn decode_login(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
+    let opcode = packet.read_varint()?;
+    match opcode {
+        0x0 => {
+            let name = packet.read_string()?;
+            let uuid = Uuid::from_u128(packet.read_u128()?);
+            Ok(ServerboundPacket::LoginStart { name, uuid })
+        }
+        0x3 => Ok(ServerboundPacket::LoginAcknowledged),
+        other => Err(invalid_data(&format!("Unknown login opcode: {other}"))),
+    }
+}
+
+fn decode_configuration(mut packet: impl Read) -> std::io::Result<ServerboundPacket> {
+    let opcode = packet.read_varint()?;
+    match opcode {
+        0x02 => {
+            let channel = Identifier::try_from(packet.read_string()?.as_str())
+                .map_err(|err| invalid_data(&err.to_string()))?;
+            let mut data = Vec::new();
+            packet.read_to_end(&mut data)?;
+            Ok(ServerboundPacket::PluginMessage { channel, data })
+        }
+        other => Err(invalid_data(&format!(
+            "Unknown configuration opcode: {other}"
+        ))),
+    }
+}
+
+/// Dispatches packet decoding according to the current protocol mode.
 fn read_packet(packet: impl Read, protocol: ProtocolMode) -> std::io::Result<ServerboundPacket> {
-    println!("{protocol:?}");
     match protocol {
         ProtocolMode::Handshake => decode_handshake(packet),
         ProtocolMode::Status => decode_status(packet),
-        _ => todo!(),
+        ProtocolMode::Login => decode_login(packet),
+        ProtocolMode::Configuration => decode_configuration(packet),
+        ProtocolMode::Play => Err(invalid_data("Play protocol not supported yet")),
     }
 }
 
@@ -301,23 +452,49 @@ fn write_packet(mut buffer: impl Write, packet: ClientboundPacket) -> std::io::R
             buffer.write_varint(0x1)?;
             buffer.write_i64(payload)?;
         }
+        ClientboundPacket::LoginSuccess {
+            uuid,
+            name,
+            properties,
+        } => {
+            buffer.write_varint(0x2)?;
+            buffer.write_u128(uuid.as_u128())?;
+            buffer.write_string(&name)?;
+
+            let Ok(properties_len) = i32::try_from(properties.len()) else {
+                return Err(invalid_data("Too many game profile properties"));
+            };
+
+            buffer.write_varint(properties_len)?;
+            for property in properties {
+                buffer.write_string(&property.name)?;
+                buffer.write_string(&property.value)?;
+                buffer.write_bool(property.signature.is_some())?;
+                if let Some(signature) = property.signature {
+                    buffer.write_string(&signature)?;
+                }
+            }
+        }
     }
 
     Ok(())
 }
 
 #[derive(Debug)]
-pub struct Client {
+struct Client {
     stream: TcpStream,
     protocol_mode: ProtocolMode,
+    brand: Option<String>,
 }
 
 impl Client {
-    pub async fn send(&mut self, packet: ClientboundPacket) -> std::io::Result<()> {
+    /// Sends a `ClientboundPacket` to the connected peer. The packet is serialized into bytes, prefixed with its length as a varint, and written to the client's TCP stream.
+    async fn send(&mut self, packet: ClientboundPacket) -> std::io::Result<()> {
+        debug!("Sending: {packet:?}");
+
         let mut buffer = Cursor::new(Vec::new());
         write_packet(&mut buffer, packet)?;
         let body = buffer.into_inner();
-        println!("{body:?}");
 
         let Ok(length) = i32::try_from(body.len()) else {
             return Err(invalid_data("Packet body too long"));
@@ -328,7 +505,7 @@ impl Client {
     }
 }
 
-pub async fn handle(packet: ServerboundPacket, client: &mut Client) -> std::io::Result<()> {
+async fn handle(packet: ServerboundPacket, client: &mut Client) -> std::io::Result<()> {
     match packet {
         ServerboundPacket::Handshake { intent, .. } => {
             client.protocol_mode = match intent {
@@ -352,21 +529,46 @@ pub async fn handle(packet: ServerboundPacket, client: &mut Client) -> std::io::
                 .send(ClientboundPacket::PongResponse(payload))
                 .await?;
         }
+        ServerboundPacket::LoginStart { name, uuid } => {
+            client
+                .send(ClientboundPacket::LoginSuccess {
+                    uuid,
+                    name,
+                    properties: Vec::new(),
+                })
+                .await?;
+        }
+        ServerboundPacket::LoginAcknowledged => client.protocol_mode = ProtocolMode::Configuration,
+        ServerboundPacket::PluginMessage { channel, data }
+            if channel == Identifier::minecraft("brand") =>
+        {
+            let mut data = Cursor::new(data);
+            let brand = data.read_string()?;
+            info!("Client brand: {brand}");
+            client.brand = Some(brand);
+        }
+        ServerboundPacket::PluginMessage { channel, .. } => {
+            warn!("Unknown plugin channel: {channel}");
+        }
     }
 
     Ok(())
 }
 
-fn invalid_data(message: &'static str) -> std::io::Error {
+fn invalid_data(message: &str) -> std::io::Error {
     std::io::Error::new(ErrorKind::InvalidData, message)
 }
 
-async fn process_socket(stream: TcpStream) -> std::io::Result<()> {
+/// Process a client TCP connection, reading framed packets and handling them until the connection ends or an error occurs.
+///
+/// This function runs the connection loop for a single client: it repeatedly reads a length, reads that many bytes as a packet payload, decodes the packet according to the client's current protocol mode, and dispatches it to the handler which may update the client's state or send responses. It returns an I/O error when socket operations fail or when a decoded length is invalid (e.g., negative).
+async fn process_socket(stream: TcpStream, addr: SocketAddr) -> std::io::Result<()> {
     let mut client = Client {
         stream,
         protocol_mode: ProtocolMode::Handshake,
+        brand: None,
     };
-    println!("Client connected");
+    info!("Client at {addr} connected");
 
     loop {
         let length = client.stream.read_varint().await?;
@@ -378,25 +580,35 @@ async fn process_socket(stream: TcpStream) -> std::io::Result<()> {
         client.stream.read_exact(&mut buffer).await?;
 
         let packet = read_packet(Cursor::new(buffer), client.protocol_mode)?;
-        println!("{packet:?}");
+        debug!("Received: {packet:?}");
 
         handle(packet, &mut client).await?;
     }
 }
 
+/// Starts the TCP server on 0.0.0.0:25565 and processes incoming client connections.
+///
+/// The server binds a listener, and spawns a task for each accepted
+/// connection that delegates to `process_socket`. Each connection task logs and ignores
+/// errors returned from `process_socket`.
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    pretty_env_logger::init();
+
     let listener = TcpListener::bind("0.0.0.0:25565").await?;
 
-    println!("Listening on 0.0.0.0:25565");
+    info!("Listening on 0.0.0.0:25565");
 
     loop {
         let (socket, addr) = listener.accept().await?;
         tokio::spawn(async move {
-            if let Err(e) = process_socket(socket).await {
-                println!("Closed connection to {addr} due to {e}");
+            match process_socket(socket, addr).await {
+                Ok(()) => info!("Client at {addr} disconnected"),
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    info!("Client at {addr} disconnected");
+                }
+                Err(e) => warn!("Closed connection to {addr} due to {e}"),
             }
-        })
-        .await?;
+        });
     }
 }
