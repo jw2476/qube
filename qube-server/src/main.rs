@@ -1,18 +1,26 @@
+mod config;
+
 use std::{
     io::{Cursor, ErrorKind},
     net::SocketAddr,
+    path::Path,
+    time::Duration,
 };
 
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use qube_proto::{
-    Handshake, HandshakeIntent, LoginStart, LoginSuccess, Packet, PingRequest, PluginMessage,
-    PongResponse, Protocol, ServerStatus, ServerboundPacket, StatusResponse, VersionInfo,
+    Handshake, HandshakeIntent, LoginStart, LoginSuccess, Packet, PingRequest, PlayersInfo,
+    PluginMessage, PongResponse, Protocol, ServerStatus, ServerboundPacket, StatusResponse,
+    TextComponent, VersionInfo,
     io::{ReadExt, WriteExt},
 };
+use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+
+use crate::config::Config;
 
 pub trait AsyncReadVarInt: AsyncReadExt {
     fn read_varint(&mut self) -> impl Future<Output = std::io::Result<i32>>;
@@ -85,7 +93,11 @@ impl Client {
     }
 }
 
-async fn handle(packet: ServerboundPacket, client: &mut Client) -> std::io::Result<()> {
+async fn handle(
+    packet: ServerboundPacket,
+    client: &mut Client,
+    config: Config,
+) -> std::io::Result<()> {
     match packet {
         ServerboundPacket::Handshake(Handshake { intent, .. }) => {
             client.protocol = match intent {
@@ -100,6 +112,13 @@ async fn handle(packet: ServerboundPacket, client: &mut Client) -> std::io::Resu
                         name: "1.21.11".to_string(),
                         protocol: 774,
                     },
+                    players: Some(PlayersInfo {
+                        max: config.status.max_players,
+                        online: 0,
+                    }),
+                    description: Some(TextComponent {
+                        text: config.status.message,
+                    }),
                     enforces_secure_chat: false,
                 }))
                 .await?;
@@ -140,7 +159,11 @@ fn invalid_data(message: &str) -> std::io::Error {
 /// Process a client TCP connection, reading framed packets and handling them until the connection ends or an error occurs.
 ///
 /// This function runs the connection loop for a single client: it repeatedly reads a length, reads that many bytes as a packet payload, decodes the packet according to the client's current protocol mode, and dispatches it to the handler which may update the client's state or send responses. It returns an I/O error when socket operations fail or when a decoded length is invalid (e.g., negative).
-async fn process_socket(stream: TcpStream, addr: SocketAddr) -> std::io::Result<()> {
+async fn process_socket(
+    stream: TcpStream,
+    addr: SocketAddr,
+    config_rx: tokio::sync::watch::Receiver<Config>,
+) -> std::io::Result<()> {
     let mut client = Client {
         stream,
         protocol: Protocol::Handshake,
@@ -160,8 +183,58 @@ async fn process_socket(stream: TcpStream, addr: SocketAddr) -> std::io::Result<
         let packet = ServerboundPacket::read(Cursor::new(buffer), client.protocol)?;
         debug!("Received: {packet:?}");
 
-        handle(packet, &mut client).await?;
+        let config = config_rx.borrow().clone();
+        handle(packet, &mut client, config).await?;
     }
+}
+
+async fn watch<T: for<'a> Deserialize<'a> + Serialize + Sync + Send + Eq + Default + 'static>(
+    path: impl AsRef<Path>,
+) -> std::io::Result<tokio::sync::watch::Receiver<T>> {
+    async fn read<T: for<'a> Deserialize<'a>>(path: &Path) -> std::io::Result<T> {
+        toml::from_slice(&tokio::fs::read(path).await?).map_err(|e| invalid_data(&e.to_string()))
+    }
+
+    let path = path.as_ref().to_path_buf();
+
+    let initial = match read(&path).await {
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            warn!(
+                "Can't find {}, creating file using default value...",
+                path.display()
+            );
+            let default = T::default();
+            std::fs::write(
+                "qube.config.toml",
+                toml::to_string(&default).map_err(|e| invalid_data(&e.to_string()))?,
+            )?;
+            default
+        }
+        other => other?,
+    };
+
+    let (tx, rx) = tokio::sync::watch::channel(initial);
+
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+
+            let Ok(new_config) = read(&path).await else {
+                error!("Failed to read updated qube.config.toml");
+                continue;
+            };
+
+            if *tx.borrow() != new_config {
+                let Ok(()) = tx.send(new_config) else {
+                    error!("Failed to send updated server config");
+                    return;
+                };
+                info!("Applied changes from qube.config.toml");
+            }
+        }
+    });
+
+    Ok(rx)
 }
 
 /// Starts the TCP server on 0.0.0.0:25565 and processes incoming client connections.
@@ -173,14 +246,17 @@ async fn process_socket(stream: TcpStream, addr: SocketAddr) -> std::io::Result<
 async fn main() -> std::io::Result<()> {
     pretty_env_logger::init();
 
-    let listener = TcpListener::bind("0.0.0.0:25565").await?;
+    let config_rx = watch::<Config>("qube.config.toml").await?;
 
-    info!("Listening on 0.0.0.0:25565");
+    let listener = TcpListener::bind(config_rx.borrow().networking.socket_addr()).await?;
+    info!("Listening on {}", listener.local_addr()?);
 
     loop {
         let (socket, addr) = listener.accept().await?;
+        let config_rx = config_rx.clone();
+
         tokio::spawn(async move {
-            match process_socket(socket, addr).await {
+            match process_socket(socket, addr, config_rx).await {
                 Ok(()) => info!("Client at {addr} disconnected"),
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                     info!("Client at {addr} disconnected");
