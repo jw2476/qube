@@ -46,6 +46,12 @@ impl Display for Identifier {
     }
 }
 
+impl PartialEq<(&str, &str)> for Identifier {
+    fn eq(&self, other: &(&str, &str)) -> bool {
+        self.namespace() == other.0 && self.value() == other.1
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IdentifierParseError {
     InvalidNamespace,
