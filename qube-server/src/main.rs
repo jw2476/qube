@@ -158,7 +158,10 @@ fn invalid_data(message: &str) -> std::io::Error {
 
 /// Process a client TCP connection, reading framed packets and handling them until the connection ends or an error occurs.
 ///
-/// This function runs the connection loop for a single client: it repeatedly reads a length, reads that many bytes as a packet payload, decodes the packet according to the client's current protocol mode, and dispatches it to the handler which may update the client's state or send responses. It returns an I/O error when socket operations fail or when a decoded length is invalid (e.g., negative).
+/// This function runs the connection loop for a single client: it repeatedly reads a length, reads that many bytes as a packet
+/// payload, decodes the packet according to the client's current protocol mode, and dispatches it to the handler which may update
+/// the client's state or send responses. It returns an I/O error when socket operations fail or when a decoded length is
+/// invalid (e.g., negative).
 async fn process_socket(
     stream: TcpStream,
     addr: SocketAddr,
@@ -188,6 +191,14 @@ async fn process_socket(
     }
 }
 
+/// Watch a file for changes. Read and deserialise the file on change.
+///
+/// If the file doesn't exist when this is initially called, a file will created containing the
+/// default value for the type.
+///
+/// # Returns
+///
+/// A channel with the latest value from the file.
 async fn watch<T: for<'a> Deserialize<'a> + Serialize + Sync + Send + Eq + Default + 'static>(
     path: impl AsRef<Path>,
 ) -> std::io::Result<tokio::sync::watch::Receiver<T>> {
@@ -222,14 +233,14 @@ async fn watch<T: for<'a> Deserialize<'a> + Serialize + Sync + Send + Eq + Defau
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
 
-            let Ok(new_config) = read(&path).await else {
+            let Ok(updated) = read(&path).await else {
                 error!("Failed to read updated file: {}", path.display());
                 continue;
             };
 
-            if *tx.borrow() != new_config {
-                let Ok(()) = tx.send(new_config) else {
-                    error!("Failed to send updated server config");
+            if *tx.borrow() != updated {
+                let Ok(()) = tx.send(updated) else {
+                    error!("Failed to send updated value");
                     return;
                 };
                 info!("Applied changes from {}", path.display());
@@ -240,7 +251,7 @@ async fn watch<T: for<'a> Deserialize<'a> + Serialize + Sync + Send + Eq + Defau
     Ok(rx)
 }
 
-/// Starts the TCP server on 0.0.0.0:25565 and processes incoming client connections.
+/// Starts the TCP server and processes incoming client connections.
 ///
 /// The server binds a listener, and spawns a task for each accepted
 /// connection that delegates to `process_socket`. Each connection task logs and ignores
