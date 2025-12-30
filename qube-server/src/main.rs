@@ -223,7 +223,7 @@ async fn watch<T: for<'a> Deserialize<'a> + Serialize + Sync + Send + Eq + Defau
             tokio::time::sleep(Duration::from_secs(1)).await;
 
             let Ok(new_config) = read(&path).await else {
-                error!("Failed to read updated qube.config.toml");
+                error!("Failed to read updated file: {}", path.display());
                 continue;
             };
 
