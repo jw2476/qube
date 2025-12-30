@@ -203,11 +203,14 @@ async fn watch<T: for<'a> Deserialize<'a> + Serialize + Sync + Send + Eq + Defau
                 "Can't find {}, creating file using default value...",
                 path.display()
             );
+
             let default = T::default();
-            std::fs::write(
-                "qube.config.toml",
+            tokio::fs::write(
+                &path,
                 toml::to_string(&default).map_err(|e| invalid_data(&e.to_string()))?,
-            )?;
+            )
+            .await?;
+
             default
         }
         other => other?,
@@ -229,7 +232,7 @@ async fn watch<T: for<'a> Deserialize<'a> + Serialize + Sync + Send + Eq + Defau
                     error!("Failed to send updated server config");
                     return;
                 };
-                info!("Applied changes from qube.config.toml");
+                info!("Applied changes from {}", path.display());
             }
         }
     });
