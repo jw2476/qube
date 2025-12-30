@@ -117,10 +117,29 @@ pub struct VersionInfo {
     pub protocol: u32,
 }
 
+/// Information about the play count sent to the client during a status check.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PlayersInfo {
+    pub max: u32,
+    pub online: u32,
+}
+
+/// The text component format, historically also known as raw JSON text, is used
+/// by Minecraft to send and display rich-text to players.
+///
+/// It can also be sent by players themselves using commands (such as /tellraw and /title)
+/// and data packs.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct TextComponent {
+    pub text: String,
+}
+
 /// Information about the server send to the client during a status check.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ServerStatus {
     pub version: VersionInfo,
+    pub players: Option<PlayersInfo>,
+    pub description: Option<TextComponent>,
     #[serde(rename = "enforcesSecureChat")]
     pub enforces_secure_chat: bool,
 }
