@@ -158,9 +158,9 @@ fn invalid_data(message: &str) -> std::io::Error {
 
 /// Process a client TCP connection, reading framed packets and handling them until the connection ends or an error occurs.
 ///
-/// This function runs the connection loop for a single client: it repeatedly reads a length, reads that many bytes as a packet 
-/// payload, decodes the packet according to the client's current protocol mode, and dispatches it to the handler which may update 
-/// the client's state or send responses. It returns an I/O error when socket operations fail or when a decoded length is 
+/// This function runs the connection loop for a single client: it repeatedly reads a length, reads that many bytes as a packet
+/// payload, decodes the packet according to the client's current protocol mode, and dispatches it to the handler which may update
+/// the client's state or send responses. It returns an I/O error when socket operations fail or when a decoded length is
 /// invalid (e.g., negative).
 async fn process_socket(
     stream: TcpStream,
@@ -240,7 +240,10 @@ async fn watch<T: for<'a> Deserialize<'a> + Serialize + Sync + Send + Eq + Defau
 
             if *tx.borrow() != updated {
                 let Ok(()) = tx.send(updated) else {
-                    error!("Failed to send updated value from change to {}", path.display());
+                    error!(
+                        "Failed to send updated value from change to {}",
+                        path.display()
+                    );
                     return;
                 };
                 info!("Applied changes from {}", path.display());
